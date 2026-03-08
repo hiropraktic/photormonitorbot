@@ -4,6 +4,7 @@ import { NewMessage } from "telegram/events";
 import * as dotenv from "dotenv";
 import * as db from "./db.ts";
 import { HELP_TEXT } from "./help.ts";
+import * as readline from "readline";
 
 dotenv.config();
 
@@ -19,7 +20,21 @@ async function startBot() {
   await client.start({
     phoneNumber: async () => process.env.PHONE_NUMBER || "",
     password: async () => process.env.PASSWORD || "",
-    phoneCode: async () => process.env.PHONE_CODE || "",
+    phoneCode: async () => {
+      if (process.env.PHONE_CODE) return process.env.PHONE_CODE;
+      
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+      
+      return new Promise((resolve) => {
+        rl.question("Please enter the code you received: ", (code) => {
+          rl.close();
+          resolve(code);
+        });
+      });
+    },
     onError: (err) => console.log(err),
   });
 
