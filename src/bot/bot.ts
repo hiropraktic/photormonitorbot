@@ -109,7 +109,7 @@ async function startBot() {
     const chatId = message.chatId.toString();
     console.log("Incoming message from chat:", chatId);
     
-    const sources = db.getSources();
+    const sources = db.getSources().map(s => s.replace(/['"`\s]/g, ''));
     
     // Normalize IDs for comparison (ensure -100 prefix)
     const normalizedChatId = chatId.startsWith("-100") ? chatId : `-100${chatId}`;
