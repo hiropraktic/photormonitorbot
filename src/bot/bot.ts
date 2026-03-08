@@ -49,8 +49,13 @@ async function startBot() {
     const command = parts[0];
 
     if (command === "/add_keyword") {
-      db.addKeyword(parts[1]);
-      await client.sendMessage(message.chatId, { message: `Keyword added: ${parts[1]}` });
+      const keywordRule = text.substring(command.length).trim();
+      if (keywordRule) {
+        db.addKeyword(keywordRule);
+        await client.sendMessage(message.chatId, { message: `Keyword rule added: ${keywordRule}` });
+      } else {
+        await client.sendMessage(message.chatId, { message: `Please provide a keyword or rule. Example: /add_keyword photo, moscow` });
+      }
     } else if (command === "/list_keywords") {
       const keywords = db.getKeywords();
       await client.sendMessage(message.chatId, { message: `Keywords: ${keywords.join(", ")}` });
@@ -145,13 +150,29 @@ async function startBot() {
     // Convert to BigInt if numeric
     const targetPeer = /^-?\d+$/.test(targetChannelId) ? BigInt(targetChannelId) : targetChannelId;
 
-    for (const keyword of keywords) {
-      if (text.includes(keyword.toLowerCase())) {
-        console.log("Found match:", text);
-        db.logMatch(keyword, chatId);
+    for (const keywordRule of keywords) {
+      // Split the rule by comma and trim spaces
+      const requiredWords = keywordRule.split(',').map(w => w.trim().toLowerCase()).filter(w => w.length > 0);
+      
+      // Check if ALL words in the rule are present in the text
+      const isMatch = requiredWords.every(word => text.includes(word));
+
+      if (isMatch && requiredWords.length > 0) {
+        console.log("Found match for rule:", keywordRule);
+        db.logMatch(keywordRule, chatId);
+        
+        let chatName = chatId;
+        try {
+          const chat = await message.getChat();
+          // @ts-ignore
+          chatName = chat?.title || chat?.firstName || chat?.username || chatId;
+        } catch (e) {
+          console.log("Could not fetch chat name, using ID");
+        }
+
         try {
           await client.sendMessage(targetPeer, {
-            message: `Found match in ${chatId}:\n\n${message.text}\n\nLink: https://t.me/c/${chatId.replace("-100", "")}/${message.id}`,
+            message: `Found match in ${chatName}:\n\n${message.text}\n\nLink: https://t.me/c/${chatId.replace("-100", "")}/${message.id}`,
           });
         } catch (e) {
           console.error("Failed to send message to target:", e);
