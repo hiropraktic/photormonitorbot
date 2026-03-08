@@ -35,12 +35,28 @@ export const addKeyword = (keyword: string) => {
   db.prepare("INSERT OR IGNORE INTO keywords (keyword) VALUES (?)").run(keyword.toLowerCase());
 };
 
+export const removeKeyword = (keyword: string) => {
+  db.prepare("DELETE FROM keywords WHERE keyword = ?").run(keyword.toLowerCase());
+};
+
+export const clearKeywords = () => {
+  db.prepare("DELETE FROM keywords").run();
+};
+
 export const getKeywords = () => {
   return (db.prepare("SELECT keyword FROM keywords").all() as { keyword: string }[]).map(r => r.keyword);
 };
 
 export const addSource = (channelId: string) => {
   db.prepare("INSERT OR IGNORE INTO sources (channel_id) VALUES (?)").run(channelId);
+};
+
+export const removeSource = (channelId: string) => {
+  db.prepare("DELETE FROM sources WHERE channel_id = ?").run(channelId);
+};
+
+export const clearSources = () => {
+  db.prepare("DELETE FROM sources").run();
 };
 
 export const getSources = () => {

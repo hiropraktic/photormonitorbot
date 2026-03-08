@@ -59,6 +59,17 @@ async function startBot() {
     } else if (command === "/list_keywords") {
       const keywords = db.getKeywords();
       await client.sendMessage(message.chatId, { message: `Keywords: ${keywords.join(", ")}` });
+    } else if (command === "/remove_keyword") {
+      const keywordRule = text.substring(command.length).trim();
+      if (keywordRule) {
+        db.removeKeyword(keywordRule);
+        await client.sendMessage(message.chatId, { message: `Keyword rule removed: ${keywordRule}` });
+      } else {
+        await client.sendMessage(message.chatId, { message: `Please provide a keyword or rule to remove.` });
+      }
+    } else if (command === "/clean_keywords") {
+      db.clearKeywords();
+      await client.sendMessage(message.chatId, { message: `All keyword rules have been cleared.` });
     } else if (command === "/add_source") {
       db.addSource(parts[1]);
       await client.sendMessage(message.chatId, { message: `Source added: ${parts[1]}` });
@@ -87,6 +98,16 @@ async function startBot() {
         }
       }));
       await client.sendMessage(message.chatId, { message: `Sources:\n${sourceInfo.join("\n")}` });
+    } else if (command === "/remove_source") {
+      if (parts[1]) {
+        db.removeSource(parts[1]);
+        await client.sendMessage(message.chatId, { message: `Source removed: ${parts[1]}` });
+      } else {
+        await client.sendMessage(message.chatId, { message: `Please provide a source ID to remove.` });
+      }
+    } else if (command === "/clean_sources") {
+      db.clearSources();
+      await client.sendMessage(message.chatId, { message: `All sources have been cleared.` });
     } else if (command === "/set_target") {
       db.setTargetChannel(parts[1]);
       await client.sendMessage(message.chatId, { message: `Target channel set: ${parts[1]}` });
