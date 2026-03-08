@@ -59,14 +59,33 @@ async function startBot() {
       await client.sendMessage(message.chatId, { message: `Source added: ${parts[1]}` });
     } else if (command === "/list_sources") {
       const sources = db.getSources();
-      await client.sendMessage(message.chatId, { message: `Sources: ${sources.join(", ")}` });
+      const sourceInfo = await Promise.all(sources.map(async (id) => {
+        try {
+          const entity = await client.getEntity(id);
+          // @ts-ignore
+          const title = entity.title || entity.firstName || "Unknown";
+          return `${title} (https://t.me/c/${id.replace("-100", "")}/999999)`; // Placeholder link
+        } catch (e) {
+          return `ID: ${id}`;
+        }
+      }));
+      await client.sendMessage(message.chatId, { message: `Sources:\n${sourceInfo.join("\n")}` });
     } else if (command === "/set_target") {
       db.setTargetChannel(parts[1]);
       await client.sendMessage(message.chatId, { message: `Target channel set: ${parts[1]}` });
     } else if (command === "/stats") {
       const stats = db.getStats();
-      const statsText = stats.map(s => `${s.keyword} in ${s.source_id}: ${s.count}`).join("\n");
-      await client.sendMessage(message.chatId, { message: `Stats (24h):\n${statsText || "No data"}` });
+      const statsText = await Promise.all(stats.map(async (s) => {
+        try {
+          const entity = await client.getEntity(s.source_id);
+          // @ts-ignore
+          const title = entity.title || entity.firstName || "Unknown";
+          return `${s.keyword} in ${title}: ${s.count}`;
+        } catch (e) {
+          return `${s.keyword} in ${s.source_id}: ${s.count}`;
+        }
+      }));
+      await client.sendMessage(message.chatId, { message: `Stats (24h):\n${statsText.join("\n") || "No data"}` });
     } else if (command === "/help") {
       await client.sendMessage(message.chatId, { message: HELP_TEXT });
     }
