@@ -61,12 +61,19 @@ async function startBot() {
       const sources = db.getSources();
       const sourceInfo = await Promise.all(sources.map(async (id) => {
         try {
+          // Try to get entity directly
           const entity = await client.getEntity(id);
           // @ts-ignore
-          const title = entity.title || entity.firstName || "Unknown";
-          return `${title} (https://t.me/c/${id.replace("-100", "")}/999999)`; // Placeholder link
+          return `${entity.title || entity.firstName || "Unknown"} (https://t.me/c/${id.replace("-100", "")}/999999)`;
         } catch (e) {
-          return `ID: ${id}`;
+          // If that fails, try to find it in dialogs
+          try {
+            const dialogs = await client.getDialogs();
+            const dialog = dialogs.find(d => d.id.toString() === id || d.id.toString() === id.replace("-100", ""));
+            return `${dialog?.title || "Unknown"} (https://t.me/c/${id.replace("-100", "")}/999999)`;
+          } catch (e2) {
+            return `ID: ${id}`;
+          }
         }
       }));
       await client.sendMessage(message.chatId, { message: `Sources:\n${sourceInfo.join("\n")}` });
@@ -79,10 +86,15 @@ async function startBot() {
         try {
           const entity = await client.getEntity(s.source_id);
           // @ts-ignore
-          const title = entity.title || entity.firstName || "Unknown";
-          return `${s.keyword} in ${title}: ${s.count}`;
+          return `${s.keyword} in ${entity.title || entity.firstName || "Unknown"}: ${s.count}`;
         } catch (e) {
-          return `${s.keyword} in ${s.source_id}: ${s.count}`;
+          try {
+            const dialogs = await client.getDialogs();
+            const dialog = dialogs.find(d => d.id.toString() === s.source_id || d.id.toString() === s.source_id.replace("-100", ""));
+            return `${s.keyword} in ${dialog?.title || s.source_id}: ${s.count}`;
+          } catch (e2) {
+            return `${s.keyword} in ${s.source_id}: ${s.count}`;
+          }
         }
       }));
       await client.sendMessage(message.chatId, { message: `Stats (24h):\n${statsText.join("\n") || "No data"}` });
@@ -94,12 +106,18 @@ async function startBot() {
   // Monitoring
   client.addEventHandler(async (event) => {
     const message = event.message;
-    console.log("Incoming message from chat:", message.chatId.toString());
+    const chatId = message.chatId.toString();
+    console.log("Incoming message from chat:", chatId);
     
     const sources = db.getSources();
     
+    // Normalize IDs for comparison (ensure -100 prefix)
+    const normalizedChatId = chatId.startsWith("-100") ? chatId : `-100${chatId}`;
+    const normalizedSources = sources.map(s => s.startsWith("-100") ? s : `-100${s}`);
+    
     // Check if the message comes from one of the monitored sources
-    if (!sources.includes(message.chatId.toString())) {
+    if (!normalizedSources.includes(chatId) && !normalizedSources.includes(normalizedChatId)) {
+      console.log("Chat not in sources:", chatId, "Sources:", sources);
       return;
     }
 
