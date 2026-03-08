@@ -39,6 +39,7 @@ async function startBot() {
   });
 
   console.log("Bot started!");
+  console.log("SESSION_STRING:", client.session.save());
 
   // Command handlers
   client.addEventHandler(async (event) => {
