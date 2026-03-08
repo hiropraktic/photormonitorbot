@@ -138,7 +138,7 @@ async function startBot() {
     
     if (!targetChannelId) {
       console.error("Target channel not set!");
-      await client.sendMessage(message.chatId, { message: "Error: Target channel not set. Use /set_target <id>" });
+      await client.sendMessage("me", { message: "Error: Target channel not set. Use /set_target <id>" });
       return;
     }
 
@@ -155,7 +155,7 @@ async function startBot() {
           });
         } catch (e) {
           console.error("Failed to send message to target:", e);
-          await client.sendMessage(message.chatId, { message: `Error sending to target: ${e}` });
+          await client.sendMessage("me", { message: `Error sending to target: ${e}` });
         }
         break; // Log only once per message
       }
