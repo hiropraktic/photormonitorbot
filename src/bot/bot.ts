@@ -61,16 +61,21 @@ async function startBot() {
       const sources = db.getSources();
       const sourceInfo = await Promise.all(sources.map(async (id) => {
         try {
+          // Clean ID and convert to BigInt if numeric
+          const cleanId = id.replace(/['"`\s]/g, '');
+          const peerId = /^-?\d+$/.test(cleanId) ? BigInt(cleanId) : cleanId;
+          
           // Try to get entity directly
-          const entity = await client.getEntity(id);
+          const entity = await client.getEntity(peerId);
           // @ts-ignore
-          return `${entity.title || entity.firstName || "Unknown"} (https://t.me/c/${id.replace("-100", "")}/999999)`;
+          return `${entity.title || entity.firstName || "Unknown"} (https://t.me/c/${cleanId.replace("-100", "")}/999999)`;
         } catch (e) {
           // If that fails, try to find it in dialogs
           try {
+            const cleanId = id.replace(/['"`\s]/g, '');
             const dialogs = await client.getDialogs();
-            const dialog = dialogs.find(d => d.id.toString() === id || d.id.toString() === id.replace("-100", ""));
-            return `${dialog?.title || "Unknown"} (https://t.me/c/${id.replace("-100", "")}/999999)`;
+            const dialog = dialogs.find(d => d.id.toString() === cleanId || d.id.toString() === cleanId.replace("-100", ""));
+            return `${dialog?.title || "Unknown"} (https://t.me/c/${cleanId.replace("-100", "")}/999999)`;
           } catch (e2) {
             return `ID: ${id}`;
           }
@@ -84,14 +89,17 @@ async function startBot() {
       const stats = db.getStats();
       const statsText = await Promise.all(stats.map(async (s) => {
         try {
-          const entity = await client.getEntity(s.source_id);
+          const cleanId = s.source_id.replace(/['"`\s]/g, '');
+          const peerId = /^-?\d+$/.test(cleanId) ? BigInt(cleanId) : cleanId;
+          const entity = await client.getEntity(peerId);
           // @ts-ignore
           return `${s.keyword} in ${entity.title || entity.firstName || "Unknown"}: ${s.count}`;
         } catch (e) {
           try {
+            const cleanId = s.source_id.replace(/['"`\s]/g, '');
             const dialogs = await client.getDialogs();
-            const dialog = dialogs.find(d => d.id.toString() === s.source_id || d.id.toString() === s.source_id.replace("-100", ""));
-            return `${s.keyword} in ${dialog?.title || s.source_id}: ${s.count}`;
+            const dialog = dialogs.find(d => d.id.toString() === cleanId || d.id.toString() === cleanId.replace("-100", ""));
+            return `${s.keyword} in ${dialog?.title || cleanId}: ${s.count}`;
           } catch (e2) {
             return `${s.keyword} in ${s.source_id}: ${s.count}`;
           }
@@ -123,15 +131,32 @@ async function startBot() {
 
     const text = message.text.toLowerCase();
     const keywords = db.getKeywords();
-    const targetChannelId = db.getTargetChannel();
+    
+    // Clean target channel ID
+    const rawTargetChannelId = db.getTargetChannel();
+    const targetChannelId = rawTargetChannelId ? rawTargetChannelId.replace(/['"`\s]/g, '') : null;
+    
+    if (!targetChannelId) {
+      console.error("Target channel not set!");
+      await client.sendMessage(message.chatId, { message: "Error: Target channel not set. Use /set_target <id>" });
+      return;
+    }
+
+    // Convert to BigInt if numeric
+    const targetPeer = /^-?\d+$/.test(targetChannelId) ? BigInt(targetChannelId) : targetChannelId;
 
     for (const keyword of keywords) {
       if (text.includes(keyword.toLowerCase())) {
         console.log("Found match:", text);
-        db.logMatch(keyword, message.chatId.toString());
-        await client.sendMessage(targetChannelId, {
-          message: `Found match in ${message.chatId}:\n\n${message.text}\n\nLink: https://t.me/c/${message.chatId}/${message.id}`,
-        });
+        db.logMatch(keyword, chatId);
+        try {
+          await client.sendMessage(targetPeer, {
+            message: `Found match in ${chatId}:\n\n${message.text}\n\nLink: https://t.me/c/${chatId.replace("-100", "")}/${message.id}`,
+          });
+        } catch (e) {
+          console.error("Failed to send message to target:", e);
+          await client.sendMessage(message.chatId, { message: `Error sending to target: ${e}` });
+        }
         break; // Log only once per message
       }
     }
