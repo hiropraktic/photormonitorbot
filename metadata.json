@@ -1,0 +1,5 @@
+{
+  "name": "PhotoRMonitorBot",
+  "description": "Monitors Telegram groups for photo editing requests and forwards them to a private channel.",
+  "requestFramePermissions": []
+}
