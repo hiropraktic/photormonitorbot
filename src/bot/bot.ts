@@ -75,6 +75,8 @@ async function startBot() {
   // Monitoring
   client.addEventHandler(async (event) => {
     const message = event.message;
+    console.log("Incoming message from chat:", message.chatId.toString());
+    
     const sources = db.getSources();
     
     // Check if the message comes from one of the monitored sources
@@ -96,7 +98,7 @@ async function startBot() {
         break; // Log only once per message
       }
     }
-  }, new NewMessage({}));
+  }, new NewMessage({ incoming: true, outgoing: true }));
 }
 
 startBot().catch(console.error);
