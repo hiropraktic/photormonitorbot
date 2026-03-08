@@ -75,6 +75,13 @@ async function startBot() {
   // Monitoring
   client.addEventHandler(async (event) => {
     const message = event.message;
+    const sources = db.getSources();
+    
+    // Check if the message comes from one of the monitored sources
+    if (!sources.includes(message.chatId.toString())) {
+      return;
+    }
+
     const text = message.text.toLowerCase();
     const keywords = db.getKeywords();
     const targetChannelId = db.getTargetChannel();
@@ -89,7 +96,7 @@ async function startBot() {
         break; // Log only once per message
       }
     }
-  }, new NewMessage({ chats: db.getSources() }));
+  }, new NewMessage({}));
 }
 
 startBot().catch(console.error);
