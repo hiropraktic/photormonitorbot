@@ -168,12 +168,33 @@ async function startBot() {
   }, new NewMessage({ incoming: true, fromUsers: ["me"] }));
 
   // Monitoring
-  client.addEventHandler(async (event) => {
+  client.addEventHandler(async (event: any) => {
+    // We only care about new messages
+    if (event.className !== 'UpdateNewMessage' && event.className !== 'UpdateNewChannelMessage') {
+      return;
+    }
+
     const message = event.message;
     if (!message) return;
     
-    const chatId = message.chatId?.toString();
+    // Extract chat ID depending on the peer type
+    let chatId = "";
+    if (message.peerId) {
+      if (message.peerId.className === 'PeerChannel') {
+        chatId = `-100${message.peerId.channelId.toString()}`;
+      } else if (message.peerId.className === 'PeerChat') {
+        chatId = `-${message.peerId.chatId.toString()}`;
+      } else if (message.peerId.className === 'PeerUser') {
+        chatId = message.peerId.userId.toString();
+      }
+    } else if (message.chatId) {
+      chatId = message.chatId.toString();
+    }
+
     if (!chatId) return;
+
+    // Ignore outgoing messages (messages sent by the userbot itself)
+    if (message.out) return;
 
     console.log("Incoming message from chat:", chatId);
     
@@ -238,7 +259,7 @@ async function startBot() {
         break; // Log only once per message
       }
     }
-  }, new NewMessage({})); // Empty config to catch absolutely everything (including channels)
+  }); // Removed NewMessage filter to catch raw updates
 }
 
 startBot().catch(console.error);
