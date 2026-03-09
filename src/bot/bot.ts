@@ -169,94 +169,118 @@ async function startBot() {
 
   // Monitoring
   client.addEventHandler(async (event: any) => {
-    // We only care about new messages
-    if (event.className !== 'UpdateNewMessage' && event.className !== 'UpdateNewChannelMessage') {
-      return;
-    }
+    let rawMessages: any[] = [];
 
-    const message = event.message;
-    if (!message) return;
-    
-    // Extract chat ID depending on the peer type
-    let chatId = "";
-    if (message.peerId) {
-      if (message.peerId.className === 'PeerChannel') {
-        chatId = `-100${message.peerId.channelId.toString()}`;
-      } else if (message.peerId.className === 'PeerChat') {
-        chatId = `-${message.peerId.chatId.toString()}`;
-      } else if (message.peerId.className === 'PeerUser') {
-        chatId = message.peerId.userId.toString();
+    // Unpack raw events
+    if (event.className === 'UpdateShortMessage') {
+      rawMessages.push({
+        message: event.message,
+        peerId: { className: 'PeerUser', userId: event.userId },
+        out: event.out,
+        id: event.id
+      });
+    } else if (event.className === 'UpdateShortChatMessage') {
+      rawMessages.push({
+        message: event.message,
+        peerId: { className: 'PeerChat', chatId: event.chatId },
+        out: event.out,
+        id: event.id,
+        fromId: { className: 'PeerUser', userId: event.fromId }
+      });
+    } else if (event.className === 'Updates' || event.className === 'UpdatesCombined') {
+      for (const update of event.updates) {
+        if (update.className === 'UpdateNewMessage' || update.className === 'UpdateNewChannelMessage') {
+          rawMessages.push(update.message);
+        }
       }
-    } else if (message.chatId) {
-      chatId = message.chatId.toString();
+    } else if (event.className === 'UpdateNewMessage' || event.className === 'UpdateNewChannelMessage') {
+      rawMessages.push(event.message);
     }
 
-    if (!chatId) return;
+    for (const msg of rawMessages) {
+      if (!msg || !msg.message) continue; // Skip empty or non-text messages
+      if (msg.out) continue; // Ignore outgoing messages (messages sent by the userbot itself)
 
-    // Ignore outgoing messages (messages sent by the userbot itself)
-    if (message.out) return;
+      // Extract chat ID depending on the peer type
+      let chatId = "";
+      if (msg.peerId) {
+        if (msg.peerId.className === 'PeerChannel') {
+          chatId = `-100${msg.peerId.channelId.toString()}`;
+        } else if (msg.peerId.className === 'PeerChat') {
+          chatId = `-${msg.peerId.chatId.toString()}`;
+        } else if (msg.peerId.className === 'PeerUser') {
+          chatId = msg.peerId.userId.toString();
+        }
+      } else if (msg.chatId) {
+        chatId = msg.chatId.toString();
+      }
 
-    console.log("Incoming message from chat:", chatId);
-    
-    const sources = db.getSources().map(s => s.replace(/['"`\s]/g, ''));
-    
-    // Normalize IDs for comparison (ensure -100 prefix)
-    const normalizedChatId = chatId.startsWith("-100") ? chatId : `-100${chatId}`;
-    const normalizedSources = sources.map(s => s.startsWith("-100") ? s : `-100${s}`);
-    
-    // Check if the message comes from one of the monitored sources
-    if (!normalizedSources.includes(chatId) && !normalizedSources.includes(normalizedChatId)) {
-      console.log("Chat not in sources:", chatId, "Sources:", sources);
-      return;
-    }
+      if (!chatId) continue;
 
-    if (!message.text) return; // Skip messages without text (like stickers, photos without captions)
-    const text = message.text.toLowerCase();
-    const keywords = db.getKeywords();
-    
-    // Clean target channel ID
-    const rawTargetChannelId = db.getTargetChannel();
-    const targetChannelId = rawTargetChannelId ? rawTargetChannelId.replace(/['"`\s]/g, '') : null;
-    
-    if (!targetChannelId) {
-      console.error("Target channel not set!");
-      await client.sendMessage("me", { message: "Error: Target channel not set. Use /set_target <id>" });
-      return;
-    }
-
-    // Convert to BigInt if numeric
-    const targetPeer = /^-?\d+$/.test(targetChannelId) ? BigInt(targetChannelId) : targetChannelId;
-
-    for (const keywordRule of keywords) {
-      // Split the rule by comma and trim spaces
-      const requiredWords = keywordRule.split(',').map(w => w.trim().toLowerCase()).filter(w => w.length > 0);
+      const sources = db.getSources().map(s => s.replace(/['"`\s]/g, ''));
       
-      // Check if ALL words in the rule are present in the text
-      const isMatch = requiredWords.every(word => text.includes(word));
+      // Normalize IDs for comparison (ensure -100 prefix)
+      const normalizedChatId = chatId.startsWith("-100") ? chatId : `-100${chatId}`;
+      const normalizedSources = sources.map(s => s.startsWith("-100") ? s : `-100${s}`);
+      
+      // Check if the message comes from one of the monitored sources
+      if (!normalizedSources.includes(chatId) && !normalizedSources.includes(normalizedChatId)) {
+        // Silently ignore to avoid spamming logs for every message in every chat
+        continue;
+      }
 
-      if (isMatch && requiredWords.length > 0) {
-        console.log("Found match for rule:", keywordRule);
-        db.logMatch(keywordRule, chatId);
+      console.log(`Incoming message from monitored chat: ${chatId}`);
+
+      const text = msg.message.toLowerCase();
+      const keywords = db.getKeywords();
+      
+      // Clean target channel ID
+      const rawTargetChannelId = db.getTargetChannel();
+      const targetChannelId = rawTargetChannelId ? rawTargetChannelId.replace(/['"`\s]/g, '') : null;
+      
+      if (!targetChannelId) {
+        console.error("Target channel not set!");
+        await client.sendMessage("me", { message: "Error: Target channel not set. Use /set_target <id>" });
+        continue;
+      }
+
+      // Convert to BigInt if numeric
+      const targetPeer = /^-?\d+$/.test(targetChannelId) ? BigInt(targetChannelId) : targetChannelId;
+
+      for (const keywordRule of keywords) {
+        // Split the rule by comma and trim spaces
+        const requiredWords = keywordRule.split(',').map(w => w.trim().toLowerCase()).filter(w => w.length > 0);
         
-        let chatName = chatId;
-        try {
-          const chat = await message.getChat();
-          // @ts-ignore
-          chatName = chat?.title || chat?.firstName || chat?.username || chatId;
-        } catch (e) {
-          console.log("Could not fetch chat name, using ID");
-        }
+        // Check if ALL words in the rule are present in the text
+        const isMatch = requiredWords.every(word => text.includes(word));
 
-        try {
-          await client.sendMessage(targetPeer, {
-            message: `Found match in ${chatName}:\n\n${message.text}\n\nLink: https://t.me/c/${chatId.replace("-100", "")}/${message.id}`,
-          });
-          console.log(`Successfully forwarded match to target: ${targetPeer}`);
-        } catch (e) {
-          console.error("Failed to send message to target:", e);
-          await client.sendMessage("me", { message: `Error sending to target: ${e}` });
+        if (isMatch && requiredWords.length > 0) {
+          console.log("Found match for rule:", keywordRule);
+          db.logMatch(keywordRule, chatId);
+          
+          let chatName = chatId;
+          try {
+            const dialogs = await client.getDialogs();
+            const dialog = dialogs.find(d => d.id.toString() === chatId || d.id.toString() === normalizedChatId);
+            if (dialog) {
+              chatName = dialog.title || dialog.name || chatId;
+            }
+          } catch (e) {
+            console.log("Could not fetch chat name");
+          }
+
+          try {
+            const cleanChatId = chatId.replace("-100", "");
+            await client.sendMessage(targetPeer, {
+              message: `Found match in ${chatName}:\n\n${msg.message}\n\nLink: https://t.me/c/${cleanChatId}/${msg.id}`,
+            });
+            console.log(`Successfully forwarded match to target: ${targetPeer}`);
+          } catch (e) {
+            console.error("Failed to send message to target:", e);
+            await client.sendMessage("me", { message: `Error sending to target: ${e}` });
+          }
+          break; // Log only once per message
         }
-        break; // Log only once per message
       }
     }
   }); // Removed NewMessage filter to catch raw updates
