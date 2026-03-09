@@ -32,6 +32,10 @@ export const setTargetChannel = (channelId: string) => {
   db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('target_channel', ?)").run(cleanId);
 };
 
+export const removeTargetChannel = () => {
+  db.prepare("DELETE FROM config WHERE key = 'target_channel'").run();
+};
+
 export const addKeyword = (keyword: string) => {
   const cleanKeyword = keyword.trim().toLowerCase();
   db.prepare("INSERT OR IGNORE INTO keywords (keyword) VALUES (?)").run(cleanKeyword);

@@ -126,6 +126,12 @@ async function startBot() {
     } else if (command === "/set_target") {
       db.setTargetChannel(parts[1]);
       await client.sendMessage(message.chatId, { message: `Target channel set: ${parts[1]}` });
+    } else if (command === "/get_target") {
+      const target = db.getTargetChannel();
+      await client.sendMessage(message.chatId, { message: `Current target channel: ${target || "Not set"}` });
+    } else if (command === "/remove_target") {
+      db.removeTargetChannel();
+      await client.sendMessage(message.chatId, { message: `Target channel has been removed. You will not receive any alerts until you set a new one.` });
     } else if (command === "/stats") {
       const stats = db.getStats();
       const statsText = await Promise.all(stats.map(async (s) => {
@@ -210,6 +216,7 @@ async function startBot() {
           await client.sendMessage(targetPeer, {
             message: `Found match in ${chatName}:\n\n${message.text}\n\nLink: https://t.me/c/${chatId.replace("-100", "")}/${message.id}`,
           });
+          console.log(`Successfully forwarded match to target: ${targetPeer}`);
         } catch (e) {
           console.error("Failed to send message to target:", e);
           await client.sendMessage("me", { message: `Error sending to target: ${e}` });
