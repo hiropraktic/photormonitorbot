@@ -176,6 +176,7 @@ async function startBot() {
       return;
     }
 
+    if (!message.text) return; // Skip messages without text (like stickers, photos without captions)
     const text = message.text.toLowerCase();
     const keywords = db.getKeywords();
     
@@ -224,7 +225,7 @@ async function startBot() {
         break; // Log only once per message
       }
     }
-  }, new NewMessage({ incoming: true, outgoing: true }));
+  }, new NewMessage({ incoming: true }));
 }
 
 startBot().catch(console.error);
