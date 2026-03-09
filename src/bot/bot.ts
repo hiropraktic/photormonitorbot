@@ -44,6 +44,15 @@ async function startBot() {
   console.log("Bot started!");
   console.log("SESSION_STRING:", client.session.save());
 
+  // Fetch dialogs to ensure the client subscribes to channel/megagroup updates
+  console.log("Fetching dialogs to enable channel updates...");
+  try {
+    await client.getDialogs();
+    console.log("Dialogs fetched successfully. Ready to monitor.");
+  } catch (e) {
+    console.error("Failed to fetch dialogs on startup:", e);
+  }
+
   // Command handlers
   client.addEventHandler(async (event) => {
     const message = event.message;
@@ -161,7 +170,11 @@ async function startBot() {
   // Monitoring
   client.addEventHandler(async (event) => {
     const message = event.message;
-    const chatId = message.chatId.toString();
+    if (!message) return;
+    
+    const chatId = message.chatId?.toString();
+    if (!chatId) return;
+
     console.log("Incoming message from chat:", chatId);
     
     const sources = db.getSources().map(s => s.replace(/['"`\s]/g, ''));
@@ -225,7 +238,7 @@ async function startBot() {
         break; // Log only once per message
       }
     }
-  }, new NewMessage({ incoming: true }));
+  }, new NewMessage({})); // Empty config to catch absolutely everything (including channels)
 }
 
 startBot().catch(console.error);
