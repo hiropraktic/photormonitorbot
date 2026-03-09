@@ -28,15 +28,18 @@ export const getTargetChannel = () => {
 };
 
 export const setTargetChannel = (channelId: string) => {
-  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('target_channel', ?)").run(channelId);
+  const cleanId = channelId.replace(/['"`\s]/g, '');
+  db.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('target_channel', ?)").run(cleanId);
 };
 
 export const addKeyword = (keyword: string) => {
-  db.prepare("INSERT OR IGNORE INTO keywords (keyword) VALUES (?)").run(keyword.toLowerCase());
+  const cleanKeyword = keyword.trim().toLowerCase();
+  db.prepare("INSERT OR IGNORE INTO keywords (keyword) VALUES (?)").run(cleanKeyword);
 };
 
 export const removeKeyword = (keyword: string) => {
-  db.prepare("DELETE FROM keywords WHERE keyword = ?").run(keyword.toLowerCase());
+  const cleanKeyword = keyword.trim().toLowerCase();
+  db.prepare("DELETE FROM keywords WHERE keyword = ?").run(cleanKeyword);
 };
 
 export const clearKeywords = () => {
@@ -48,11 +51,13 @@ export const getKeywords = () => {
 };
 
 export const addSource = (channelId: string) => {
-  db.prepare("INSERT OR IGNORE INTO sources (channel_id) VALUES (?)").run(channelId);
+  const cleanId = channelId.replace(/['"`\s]/g, '');
+  db.prepare("INSERT OR IGNORE INTO sources (channel_id) VALUES (?)").run(cleanId);
 };
 
 export const removeSource = (channelId: string) => {
-  db.prepare("DELETE FROM sources WHERE channel_id = ?").run(channelId);
+  const cleanId = channelId.replace(/['"`\s]/g, '');
+  db.prepare("DELETE FROM sources WHERE channel_id = ?").run(cleanId);
 };
 
 export const clearSources = () => {
@@ -75,6 +80,37 @@ export const getStats = () => {
     GROUP BY keyword, source_id
   `).all() as { keyword: string, source_id: string, count: number }[];
   return stats;
+};
+
+export const cleanDatabase = () => {
+  // Clean sources
+  const sources = db.prepare("SELECT channel_id FROM sources").all() as { channel_id: string }[];
+  for (const s of sources) {
+    const cleanId = s.channel_id.replace(/['"`\s]/g, '');
+    if (cleanId !== s.channel_id) {
+      db.prepare("DELETE FROM sources WHERE channel_id = ?").run(s.channel_id);
+      db.prepare("INSERT OR IGNORE INTO sources (channel_id) VALUES (?)").run(cleanId);
+    }
+  }
+  
+  // Clean keywords
+  const keywords = db.prepare("SELECT keyword FROM keywords").all() as { keyword: string }[];
+  for (const k of keywords) {
+    const cleanKeyword = k.keyword.trim().toLowerCase();
+    if (cleanKeyword !== k.keyword) {
+      db.prepare("DELETE FROM keywords WHERE keyword = ?").run(k.keyword);
+      db.prepare("INSERT OR IGNORE INTO keywords (keyword) VALUES (?)").run(cleanKeyword);
+    }
+  }
+
+  // Clean target channel
+  const target = getTargetChannel();
+  if (target) {
+    const cleanTarget = target.replace(/['"`\s]/g, '');
+    if (cleanTarget !== target) {
+      setTargetChannel(cleanTarget);
+    }
+  }
 };
 
 export default db;

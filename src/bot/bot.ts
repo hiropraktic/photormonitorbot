@@ -8,6 +8,9 @@ import * as readline from "readline";
 
 dotenv.config();
 
+// Clean up any dirty data in the database on startup
+db.cleanDatabase();
+
 const apiId = parseInt(process.env.TG_API_ID || "0");
 const apiHash = process.env.TG_API_HASH || "";
 const stringSession = new StringSession(process.env.SESSION_STRING || "");
@@ -58,7 +61,12 @@ async function startBot() {
       }
     } else if (command === "/list_keywords") {
       const keywords = db.getKeywords();
-      await client.sendMessage(message.chatId, { message: `Keywords: ${keywords.join(", ")}` });
+      if (keywords.length === 0) {
+        await client.sendMessage(message.chatId, { message: `No keywords or rules found.` });
+      } else {
+        const formattedKeywords = keywords.map(k => `- \`${k}\``).join("\n");
+        await client.sendMessage(message.chatId, { message: `**Keywords/Rules:**\n${formattedKeywords}` });
+      }
     } else if (command === "/remove_keyword") {
       const keywordRule = text.substring(command.length).trim();
       if (keywordRule) {
@@ -84,20 +92,27 @@ async function startBot() {
           // Try to get entity directly
           const entity = await client.getEntity(peerId);
           // @ts-ignore
-          return `${entity.title || entity.firstName || "Unknown"} (https://t.me/c/${cleanId.replace("-100", "")}/999999)`;
+          const name = entity.title || entity.firstName || "Unknown";
+          return `- ${name} (https://t.me/c/${cleanId.replace("-100", "")}/999999)\n  ID: \`${cleanId}\``;
         } catch (e) {
           // If that fails, try to find it in dialogs
           try {
             const cleanId = id.replace(/['"`\s]/g, '');
             const dialogs = await client.getDialogs();
             const dialog = dialogs.find(d => d.id.toString() === cleanId || d.id.toString() === cleanId.replace("-100", ""));
-            return `${dialog?.title || "Unknown"} (https://t.me/c/${cleanId.replace("-100", "")}/999999)`;
+            const name = dialog?.title || "Unknown";
+            return `- ${name} (https://t.me/c/${cleanId.replace("-100", "")}/999999)\n  ID: \`${cleanId}\``;
           } catch (e2) {
-            return `ID: ${id}`;
+            return `- Unknown Group\n  ID: \`${id}\``;
           }
         }
       }));
-      await client.sendMessage(message.chatId, { message: `Sources:\n${sourceInfo.join("\n")}` });
+      
+      if (sourceInfo.length === 0) {
+        await client.sendMessage(message.chatId, { message: `No sources found.` });
+      } else {
+        await client.sendMessage(message.chatId, { message: `**Sources:**\n${sourceInfo.join("\n\n")}` });
+      }
     } else if (command === "/remove_source") {
       if (parts[1]) {
         db.removeSource(parts[1]);
