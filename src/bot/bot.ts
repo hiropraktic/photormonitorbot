@@ -72,7 +72,7 @@ async function checkSourceMessages(client: TelegramClient, sourceId: string) {
             // Update DB with the highest ID found in this successful batch
             if (newLastId !== null) {
                 db.setLastMessageId(sourceId, newLastId);
-                console.log(\`Updated last message ID for \${sourceId} to \${newLastId}\`);
+                console.log(`Updated last message ID for \${sourceId} to \${newLastId}\`);
             }
         } else if (lastMessageId === null && messages.length > 0) {
              // Initialization case: If we polled, found messages, but none were *newer* than null, 
