@@ -8,3 +8,4 @@ coverage/
 !.env.example
 bot.db
 Photo Monitor Bot.txt
+.gitignore
