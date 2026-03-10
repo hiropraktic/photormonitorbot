@@ -39,22 +39,30 @@ export const removeTargetChannel = () => {
 };
 
 // --- Keywords ---
+let keywordsCache: string[] | null = null;
+
 export const addKeyword = (keyword: string) => {
   const cleanKeyword = keyword.trim().toLowerCase();
   db.prepare("INSERT OR IGNORE INTO keywords (keyword) VALUES (?)").run(cleanKeyword);
+  keywordsCache = null; // Invalidate cache
 };
 
 export const removeKeyword = (keyword: string) => {
   const cleanKeyword = keyword.trim().toLowerCase();
   db.prepare("DELETE FROM keywords WHERE keyword = ?").run(cleanKeyword);
+  keywordsCache = null; // Invalidate cache
 };
 
 export const clearKeywords = () => {
   db.prepare("DELETE FROM keywords").run();
+  keywordsCache = null; // Invalidate cache
 };
 
 export const getKeywords = () => {
-  return (db.prepare("SELECT keyword FROM keywords").all() as { keyword: string }[]).map(r => r.keyword);
+  if (keywordsCache === null) {
+    keywordsCache = (db.prepare("SELECT keyword FROM keywords").all() as { keyword: string }[]).map(r => r.keyword);
+  }
+  return keywordsCache;
 };
 
 // --- Sources ---
@@ -133,12 +141,17 @@ export const cleanDatabase = () => {
 
   // Clean keywords
   const keywords = db.prepare("SELECT keyword FROM keywords").all() as { keyword: string }[];
+  let keywordsModified = false;
   for (const k of keywords) {
     const cleanKeyword = k.keyword.trim().toLowerCase();
     if (cleanKeyword !== k.keyword) {
       db.prepare("DELETE FROM keywords WHERE keyword = ?").run(k.keyword);
       db.prepare("INSERT OR IGNORE INTO keywords (keyword) VALUES (?)").run(cleanKeyword);
+      keywordsModified = true;
     }
+  }
+  if (keywordsModified) {
+    keywordsCache = null;
   }
 
   // Clean target channel

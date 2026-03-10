@@ -281,7 +281,6 @@ async function startBot() {
       if (keywordRule) {
         db.addKeyword(keywordRule);
         await client.sendMessage(message.chatId, { message: `Keyword rule added: ${keywordRule}` });
-        // No need to recache for keywords
       } else {
         await client.sendMessage(message.chatId, { message: `Please provide a keyword or rule. Example: /add_keyword photo, moscow` });
       }
