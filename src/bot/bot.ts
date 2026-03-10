@@ -28,9 +28,17 @@ async function checkSourceMessages(client: TelegramClient, sourceId: string) {
     try {
         console.log(`[POLL] Polling source: ${sourceId}. Last ID: ${lastMessageId || 'N/A'}`);
 
-        // Fetch up to 5 recent messages
+        // Fetch up to 100 recent messages if we have a baseline, otherwise fetch 2 to initialize
+        const fetchLimit = lastMessageId ? 100 : 2;
+        const fetchConfig: any = { limit: fetchLimit };
+        
+        if (lastMessageId) {
+            // Tell MTProto to only give us messages strictly newer than our last processed ID
+            fetchConfig.minId = parseInt(lastMessageId);
+        }
+
         // @ts-ignore
-        const messages = await client.getMessages(peer, { limit: 5 });
+        const messages = await client.getMessages(peer, fetchConfig);
 
         if (!messages.length) {
             return;
@@ -48,7 +56,7 @@ async function checkSourceMessages(client: TelegramClient, sourceId: string) {
             
             if (lastMessageId === null || BigInt(currentId) > BigInt(lastMessageId)) {
                 newMessages.push(message);
-                // Keep track of the highest ID found so far in this batch (which will be the new last ID if we process all 5)
+                // Keep track of the highest ID found so far in this batch
                 if (newLastId === null || BigInt(currentId) > BigInt(newLastId)) {
                      newLastId = currentId;
                 }
@@ -59,19 +67,23 @@ async function checkSourceMessages(client: TelegramClient, sourceId: string) {
         }
         
         if (newMessages.length > 0) {
-            // Reverse to process older messages first in this batch if multiple were found
+            // MUST reverse to process older messages first so we go in chronological order
             newMessages.reverse(); 
             
-            console.log(`[POLL] Found ${newMessages.length} new messages in ${sourceId}. Processing...`);
+            console.log(`[POLL] Found ${newMessages.length} new messages in ${sourceId}. Processing chronologically...`);
 
             // Process found messages using the existing message handler logic
             for (const message of newMessages) {
                 if (message.text) {
-                     console.log(`[POLL] Chat: ${sourceId}, fetched new msg: "${message.text.substring(0, 50)}..."`);
+                     console.log(`[POLL] Chat: ${sourceId}, fetched new msg: "${message.text.substring(0, 50).replace(/\n/g, ' ')}..."`);
                 } else {
                      console.log(`[POLL] Chat: ${sourceId}, fetched new msg (no text)`);
                 }
-                await processIncomingMessage(client, message, "POLLING");
+                
+                // Only process text messages through the keyword filter
+                if (message.text) {
+                     await processIncomingMessage(client, message, "POLLING");
+                }
             }
 
             // Update DB with the highest ID found in this successful batch
@@ -80,8 +92,7 @@ async function checkSourceMessages(client: TelegramClient, sourceId: string) {
                 console.log(`[POLL] Updated last message ID for ${sourceId} to ${newLastId}`);
             }
         } else if (lastMessageId === null && messages.length > 0) {
-             // Initialization case: If we polled, found messages, but none were *newer* than null, 
-             // we set the highest ID found as the starting point. The highest ID is the first message in the array (index 0), provided it's not an outgoing message.
+             // Initialization case: First run, set the newest message as our baseline
              const firstUsableMessage = messages.find(m => !m.out && m.id);
              if (firstUsableMessage && firstUsableMessage.id) {
                 db.setLastMessageId(sourceId, firstUsableMessage.id.toString());
@@ -135,8 +146,8 @@ async function processIncomingMessage(client: TelegramClient, message: Api.Messa
     
     console.log(`\n[${sourcePrefix}] --- STARTING FILTER CHECK ---`);
     console.log(`[${sourcePrefix}] Chat ID: ${chatId}`);
-    console.log(`[${sourcePrefix}] Original Text: "${message.text.substring(0, 50)}..."`);
-    console.log(`[${sourcePrefix}] Lowercased Text: "${text.substring(0, 50)}..."`);
+    console.log(`[${sourcePrefix}] Original Text: "${message.text.substring(0, 50).replace(/\n/g, ' ')}..."`);
+    console.log(`[${sourcePrefix}] Lowercased Text: "${text.substring(0, 50).replace(/\n/g, ' ')}..."`);
 
     let matchedRule: string | null = null;
 
@@ -193,7 +204,12 @@ async function processIncomingMessage(client: TelegramClient, message: Api.Messa
           console.log(`[${sourcePrefix}] Successfully forwarded match to target: ${targetPeer}`);
         } catch (e: any) {
           console.error(`[${sourcePrefix}] Failed to send message to target:`, e.message);
-          await client.sendMessage("me", { message: `Error sending to target from ${sourcePrefix}: ${e.message}` });
+          try {
+             await client.sendMessage("me", { message: `[Bot Error] Failed to send match to target channel. Error: ${e.message}\nRule: ${matchedRule}\nOriginal chat: ${chatName}` });
+             console.log(`[${sourcePrefix}] Error notification sent to 'me'`);
+          } catch (meErr: any) {
+             console.error(`[${sourcePrefix}] CRITICAL: Failed to send error notification to 'me':`, meErr.message);
+          }
         }
     }
 }
