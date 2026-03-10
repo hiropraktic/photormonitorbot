@@ -80,19 +80,22 @@ export const getSources = () => {
 
 // --- Polling State Management ---
 export const getLastMessageId = (channelId: string) => {
-    const cleanId = channelId.replace(/['"\s]/g, '');
-    const row = db.prepare("SELECT last_message_id FROM sources WHERE channel_id = ?").get() as { last_message_id: string } | undefined;
+    if (!channelId) return null;
+    const cleanId = channelId.toString().replace(/['"\s]/g, '');
+    const row = db.prepare("SELECT last_message_id FROM sources WHERE channel_id = ?").get(cleanId) as { last_message_id: string } | undefined;
     return row?.last_message_id || null; // Return null if not found or not set
 };
 
 export const setLastMessageId = (channelId: string, messageId: string | number) => {
-    const cleanId = channelId.replace(/['"\s]/g, '');
+    if (!channelId || !messageId) return;
+    const cleanId = channelId.toString().replace(/['"\s]/g, '');
     db.prepare("UPDATE sources SET last_message_id = ? WHERE channel_id = ?").run(String(messageId), cleanId);
 };
 
 
 // --- Match Logging ---
 export const logMatch = (keyword: string, sourceId: string) => {
+  if (!keyword || !sourceId) return;
   db.prepare("INSERT INTO matches (keyword, source_id) VALUES (?, ?)").run(keyword, sourceId);
 };
 

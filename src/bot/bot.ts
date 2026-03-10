@@ -10,7 +10,8 @@ import { Api } from "telegram";
 dotenv.config();
 
 // Helper to handle Telegram IDs as BigInt or string
-function parsePeerId(id: string): any {
+function parsePeerId(id: string | number | bigint): any {
+  if (id === undefined || id === null) return "";
   const clean = id.toString().replace(/['"\s]/g, "");
   if (/^-?\d+$/.test(clean)) return BigInt(clean);
   return clean;
@@ -20,20 +21,18 @@ function parsePeerId(id: string): any {
 
 // Worker function to fetch messages from a source using client.getMessages
 async function checkSourceMessages(client: TelegramClient, sourceId: string) {
+    if (!sourceId) return;
     const peer = parsePeerId(sourceId);
     const lastMessageId = db.getLastMessageId(sourceId);
     
     try {
-        console.log(`Polling source: ${sourceId}. Last ID: ${lastMessageId || 'N/A'}`);
+        console.log(`[POLL] Polling source: ${sourceId}. Last ID: ${lastMessageId || 'N/A'}`);
 
         // Fetch up to 5 recent messages
         // @ts-ignore
         const messages = await client.getMessages(peer, { limit: 5 });
 
         if (!messages.length) {
-            if (lastMessageId === null) {
-                 // If no messages and no last ID, we do nothing for now to avoid setting a baseline from an empty list if the chat is truly empty.
-            }
             return;
         }
 
@@ -63,17 +62,22 @@ async function checkSourceMessages(client: TelegramClient, sourceId: string) {
             // Reverse to process older messages first in this batch if multiple were found
             newMessages.reverse(); 
             
-            console.log(`Found ${newMessages.length} new messages in ${sourceId}. Processing...`);
+            console.log(`[POLL] Found ${newMessages.length} new messages in ${sourceId}. Processing...`);
 
             // Process found messages using the existing message handler logic
             for (const message of newMessages) {
-                await processIncomingMessage(client, message);
+                if (message.text) {
+                     console.log(`[POLL] Chat: ${sourceId}, fetched new msg: "${message.text.substring(0, 50)}..."`);
+                } else {
+                     console.log(`[POLL] Chat: ${sourceId}, fetched new msg (no text)`);
+                }
+                await processIncomingMessage(client, message, "POLLING");
             }
 
             // Update DB with the highest ID found in this successful batch
             if (newLastId !== null) {
                 db.setLastMessageId(sourceId, newLastId);
-                console.log(`Updated last message ID for ${sourceId} to ${newLastId}`);
+                console.log(`[POLL] Updated last message ID for ${sourceId} to ${newLastId}`);
             }
         } else if (lastMessageId === null && messages.length > 0) {
              // Initialization case: If we polled, found messages, but none were *newer* than null, 
@@ -81,40 +85,96 @@ async function checkSourceMessages(client: TelegramClient, sourceId: string) {
              const firstUsableMessage = messages.find(m => !m.out && m.id);
              if (firstUsableMessage && firstUsableMessage.id) {
                 db.setLastMessageId(sourceId, firstUsableMessage.id.toString());
-                console.log(`Initialized last message ID for ${sourceId} to ${firstUsableMessage.id}`);
+                console.log(`[POLL] Initialized last message ID for ${sourceId} to ${firstUsableMessage.id}`);
              }
         }
 
     } catch (e: any) {
-        console.error(`Polling error for source ${sourceId}: ${e.message}`);
+        console.error(`[POLL] Polling error for source ${sourceId}: ${e.message}`);
     }
 }
 
 
 // Helper function to process a message, extracted from the original NewMessage handler
-async function processIncomingMessage(client: TelegramClient, message: Api.Message) {
+async function processIncomingMessage(client: TelegramClient, message: Api.Message, sourcePrefix: string = "EVENT") {
     if (!message.text) return;
 
-    const chatId = message.chatId?.toString();
-    if (!chatId) return;
+    // Use message.peerId for a more reliable chat ID if event.chatId fails or is inconsistent
+    let rawChatId = message.chatId?.toString();
+    if (!rawChatId && message.peerId) {
+        // Construct string ID from peer object
+        if (message.peerId.className === 'PeerChannel') {
+             // @ts-ignore
+             rawChatId = `-100${message.peerId.channelId.toString()}`;
+        } else if (message.peerId.className === 'PeerChat') {
+             // @ts-ignore
+             rawChatId = `-${message.peerId.chatId.toString()}`;
+        } else if (message.peerId.className === 'PeerUser') {
+             // @ts-ignore
+             rawChatId = message.peerId.userId.toString();
+        }
+    }
+
+    if (!rawChatId) {
+         console.log(`[${sourcePrefix}] Cannot determine Chat ID for message ${message.id}. Skipping.`);
+         return;
+    }
+    
+    const chatId = rawChatId;
 
     const text = message.text.toLowerCase();
     const keywords = db.getKeywords();
     const rawTargetChannelId = db.getTargetChannel();
     
     if (!rawTargetChannelId) {
+      console.log(`[${sourcePrefix}] Target channel not set. Skipping message processing.`);
       return;
     }
 
     const targetPeer = parsePeerId(rawTargetChannelId);
+    
+    console.log(`\n[${sourcePrefix}] --- STARTING FILTER CHECK ---`);
+    console.log(`[${sourcePrefix}] Chat ID: ${chatId}`);
+    console.log(`[${sourcePrefix}] Original Text: "${message.text.substring(0, 50)}..."`);
+    console.log(`[${sourcePrefix}] Lowercased Text: "${text.substring(0, 50)}..."`);
+
+    let matchedRule: string | null = null;
 
     for (const keywordRule of keywords) {
+      // Split by comma, trim spaces, convert to lowercase, and remove empty strings
       const requiredWords = keywordRule.split(',').map(w => w.trim().toLowerCase()).filter(w => w.length > 0);
-      const isMatch = requiredWords.every(word => text.includes(word));
+      
+      console.log(`[${sourcePrefix}] Checking Rule: "${keywordRule}"`);
+      console.log(`[${sourcePrefix}] Parsed Words Array:`, requiredWords);
 
-      if (isMatch && requiredWords.length > 0) {
-        console.log("Found match for rule via Polling:", keywordRule);
-        db.logMatch(keywordRule, chatId);
+      if (requiredWords.length === 0) {
+          console.log(`[${sourcePrefix}] Rule is empty after parsing. Skipping.`);
+          continue;
+      }
+
+      let allWordsFound = true;
+      for (const word of requiredWords) {
+          const isFound = text.includes(word);
+          console.log(`[${sourcePrefix}] - Checking word: "${word}" -> Found: ${isFound}`);
+          if (!isFound) {
+              allWordsFound = false;
+              break; // Optimization: If one word fails, the AND rule fails
+          }
+      }
+
+      if (allWordsFound) {
+        matchedRule = keywordRule;
+        console.log(`[${sourcePrefix}] => MATCH FOUND for rule: "${matchedRule}"`);
+        break; // Match found, no need to check other rules for the same message
+      } else {
+        console.log(`[${sourcePrefix}] => Rule "${keywordRule}" failed.`);
+      }
+    }
+    
+    console.log(`[${sourcePrefix}] --- FILTER CHECK COMPLETE ---`);
+
+    if (matchedRule) {
+        db.logMatch(matchedRule, chatId);
         
         let chatName = chatId;
         try {
@@ -122,21 +182,19 @@ async function processIncomingMessage(client: TelegramClient, message: Api.Messa
           // @ts-ignore
           chatName = entity.title || entity.firstName || chatId;
         } catch (e) {
-          console.log("Could not fetch chat name for polled message");
+          console.log(`[${sourcePrefix}] Could not fetch chat name for message`);
         }
 
         try {
           const cleanChatId = chatId.replace("-100", "");
           await client.sendMessage(targetPeer, {
-            message: `[POLLING] Found match in ${chatName}:\n\n${message.text}\n\nLink: https://t.me/c/${cleanChatId}/${message.id}`,
+            message: `[${sourcePrefix}] Found match in ${chatName}:\n\n${message.text}\n\nLink: https://t.me/c/${cleanChatId}/${message.id}`,
           });
-          console.log(`Successfully forwarded polled match to target: ${targetPeer}`);
+          console.log(`[${sourcePrefix}] Successfully forwarded match to target: ${targetPeer}`);
         } catch (e: any) {
-          console.error("Failed to send message to target:", e.message);
-          await client.sendMessage("me", { message: `Error sending to target from polling: ${e.message}` });
+          console.error(`[${sourcePrefix}] Failed to send message to target:`, e.message);
+          await client.sendMessage("me", { message: `Error sending to target from ${sourcePrefix}: ${e.message}` });
         }
-        break; // Match found, no need to check other rules for the same message
-      }
     }
 }
 
@@ -147,6 +205,7 @@ async function cacheMonitoredEntities(client: TelegramClient) {
   console.log(`Caching ${sources.length} sources...`);
   
   for (const id of sources) {
+    if (!id) continue;
     try {
       const peer = parsePeerId(id);
       await client.getEntity(peer);
@@ -164,11 +223,11 @@ function startPollingWorker(client: TelegramClient) {
 
     setInterval(async () => {
         const sources = db.getSources();
-        console.log(`[POLL TICK] Checking ${sources.length} sources.`);
-        
-        // Use Promise.allSettled to continue execution even if one source check fails
-        await Promise.allSettled(sources.map(sourceId => checkSourceMessages(client, sourceId)));
-
+        if (sources.length > 0) {
+           console.log(`[POLL TICK] Checking ${sources.length} sources.`);
+           // Use Promise.allSettled to continue execution even if one source check fails
+           await Promise.allSettled(sources.map(sourceId => checkSourceMessages(client, sourceId)));
+        }
     }, POLLING_INTERVAL_MS);
 }
 
@@ -332,14 +391,30 @@ async function startBot() {
     const { message } = event;
     if (!message || !message.text || message.out) return;
 
-    const chatId = event.chatId?.toString();
-    if (!chatId) return;
+    // Use same reliable logic as processIncomingMessage to get Chat ID
+    let rawChatId = event.chatId?.toString();
+    if (!rawChatId && message.peerId) {
+        if (message.peerId.className === 'PeerChannel') {
+             // @ts-ignore
+             rawChatId = `-100${message.peerId.channelId.toString()}`;
+        } else if (message.peerId.className === 'PeerChat') {
+             // @ts-ignore
+             rawChatId = `-${message.peerId.chatId.toString()}`;
+        } else if (message.peerId.className === 'PeerUser') {
+             // @ts-ignore
+             rawChatId = message.peerId.userId.toString();
+        }
+    }
+    
+    if (!rawChatId) return;
+    const chatId = rawChatId;
 
     const sources = db.getSources();
     const normalizedChatId = chatId.startsWith("-100") ? chatId : `-100${chatId}`;
     
     // Check if the message comes from one of the monitored sources
     const isMonitored = sources.some(s => {
+      if (!s) return false;
       const cleanS = s.replace(/['"\s]/g, '');
       const normalizedS = cleanS.startsWith("-100") ? cleanS : `-100${cleanS}`;
       return cleanS === chatId || normalizedS === chatId || cleanS === normalizedChatId || normalizedS === normalizedChatId;
@@ -347,60 +422,21 @@ async function startBot() {
 
     if (!isMonitored) return;
 
-    console.log(`Incoming message from monitored chat (Event Listener): ${chatId}`);
+    console.log(`[EVENT] Incoming message from monitored chat: ${chatId}`);
 
-    // Check against polling ID to avoid processing messages already handled by polling (i.e., messages that arrived before the push event did, or when the push event is delayed)
+    // Check against polling ID to avoid processing messages already handled by polling
     const currentLastId = db.getLastMessageId(chatId);
     if (message.id && currentLastId && BigInt(message.id) <= BigInt(currentLastId)) {
-        console.log(`Skipping message ${message.id} from ${chatId} as it is not newer than last polled ID (${currentLastId})`);
+        console.log(`[EVENT] Skipping message ${message.id} from ${chatId} as it is not newer than last polled ID (${currentLastId})`);
         return;
     }
     
-    const text = message.text.toLowerCase();
-    const keywords = db.getKeywords();
-    const rawTargetChannelId = db.getTargetChannel();
-    
-    if (!rawTargetChannelId) {
-      return;
-    }
-
-    const targetPeer = parsePeerId(rawTargetChannelId);
-
-    for (const keywordRule of keywords) {
-      const requiredWords = keywordRule.split(',').map(w => w.trim().toLowerCase()).filter(w => w.length > 0);
-      const isMatch = requiredWords.every(word => text.includes(word));
-
-      if (isMatch && requiredWords.length > 0) {
-        console.log("Found match for rule via Event Listener:", keywordRule);
-        db.logMatch(keywordRule, chatId);
-        
-        let chatName = chatId;
-        try {
-          const entity = await client.getEntity(parsePeerId(chatId));
-          // @ts-ignore
-          chatName = entity.title || entity.firstName || chatId;
-        } catch (e) {
-          console.log("Could not fetch chat name for message");
-        }
-
-        try {
-          const cleanChatId = chatId.replace("-100", "");
-          await client.sendMessage(targetPeer, {
-            message: `[EVENT] Found match in ${chatName}:\n\n${message.text}\n\nLink: https://t.me/c/${cleanChatId}/${message.id}`,
-          });
-          console.log(`Successfully forwarded match to target: ${targetPeer}`);
-        } catch (e: any) {
-          console.error("Failed to send message to target:", e.message);
-          await client.sendMessage("me", { message: `Error sending to target: ${e.message}` });
-        }
-        break; // Match found, no need to check other rules for the same message
-      }
-    }
+    await processIncomingMessage(client, message, "EVENT");
     
     // If processed here, update the ID regardless to keep the fast path synced with the slow path baseline
     if (message.id) {
         db.setLastMessageId(chatId, message.id.toString());
-        console.log(`Updated last message ID for ${chatId} to ${message.id} via Event Listener update.`);
+        console.log(`[EVENT] Updated last message ID for ${chatId} to ${message.id}`);
     }
     
   }, new NewMessage({ incoming: true }));
