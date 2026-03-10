@@ -26,8 +26,6 @@ async function checkSourceMessages(client: TelegramClient, sourceId: string) {
     const lastMessageId = db.getLastMessageId(sourceId);
     
     try {
-        console.log(`[POLL] Polling source: ${sourceId}. Last ID: ${lastMessageId || 'N/A'}`);
-
         // Fetch up to 100 recent messages if we have a baseline, otherwise fetch 2 to initialize
         const fetchLimit = lastMessageId ? 100 : 2;
         const fetchConfig: any = { limit: fetchLimit };
@@ -69,17 +67,9 @@ async function checkSourceMessages(client: TelegramClient, sourceId: string) {
         if (newMessages.length > 0) {
             // MUST reverse to process older messages first so we go in chronological order
             newMessages.reverse(); 
-            
-            console.log(`[POLL] Found ${newMessages.length} new messages in ${sourceId}. Processing chronologically...`);
 
             // Process found messages using the existing message handler logic
             for (const message of newMessages) {
-                if (message.text) {
-                     console.log(`[POLL] Chat: ${sourceId}, fetched new msg: "${message.text.substring(0, 50).replace(/\n/g, ' ')}..."`);
-                } else {
-                     console.log(`[POLL] Chat: ${sourceId}, fetched new msg (no text)`);
-                }
-                
                 // Only process text messages through the keyword filter
                 if (message.text) {
                      await processIncomingMessage(client, message, "POLLING");
@@ -89,19 +79,18 @@ async function checkSourceMessages(client: TelegramClient, sourceId: string) {
             // Update DB with the highest ID found in this successful batch
             if (newLastId !== null) {
                 db.setLastMessageId(sourceId, newLastId);
-                console.log(`[POLL] Updated last message ID for ${sourceId} to ${newLastId}`);
             }
         } else if (lastMessageId === null && messages.length > 0) {
              // Initialization case: First run, set the newest message as our baseline
              const firstUsableMessage = messages.find(m => !m.out && m.id);
              if (firstUsableMessage && firstUsableMessage.id) {
                 db.setLastMessageId(sourceId, firstUsableMessage.id.toString());
-                console.log(`[POLL] Initialized last message ID for ${sourceId} to ${firstUsableMessage.id}`);
+                console.log(`Initialized last message ID baseline for ${sourceId}`);
              }
         }
 
     } catch (e: any) {
-        console.error(`[POLL] Polling error for source ${sourceId}: ${e.message}`);
+        console.error(`[POLL] Error for source ${sourceId}: ${e.message}`);
     }
 }
 
@@ -127,7 +116,6 @@ async function processIncomingMessage(client: TelegramClient, message: Api.Messa
     }
 
     if (!rawChatId) {
-         console.log(`[${sourcePrefix}] Cannot determine Chat ID for message ${message.id}. Skipping.`);
          return;
     }
     
@@ -138,36 +126,24 @@ async function processIncomingMessage(client: TelegramClient, message: Api.Messa
     const rawTargetChannelId = db.getTargetChannel();
     
     if (!rawTargetChannelId) {
-      console.log(`[${sourcePrefix}] Target channel not set. Skipping message processing.`);
       return;
     }
 
     const targetPeer = parsePeerId(rawTargetChannelId);
-    
-    console.log(`\n[${sourcePrefix}] --- STARTING FILTER CHECK ---`);
-    console.log(`[${sourcePrefix}] Chat ID: ${chatId}`);
-    console.log(`[${sourcePrefix}] Original Text: "${message.text.substring(0, 50).replace(/\n/g, ' ')}..."`);
-    console.log(`[${sourcePrefix}] Lowercased Text: "${text.substring(0, 50).replace(/\n/g, ' ')}..."`);
 
     let matchedRule: string | null = null;
 
     for (const keywordRule of keywords) {
       // Split by comma, trim spaces, convert to lowercase, and remove empty strings
       const requiredWords = keywordRule.split(',').map(w => w.trim().toLowerCase()).filter(w => w.length > 0);
-      
-      console.log(`[${sourcePrefix}] Checking Rule: "${keywordRule}"`);
-      console.log(`[${sourcePrefix}] Parsed Words Array:`, requiredWords);
 
       if (requiredWords.length === 0) {
-          console.log(`[${sourcePrefix}] Rule is empty after parsing. Skipping.`);
           continue;
       }
 
       let allWordsFound = true;
       for (const word of requiredWords) {
-          const isFound = text.includes(word);
-          console.log(`[${sourcePrefix}] - Checking word: "${word}" -> Found: ${isFound}`);
-          if (!isFound) {
+          if (!text.includes(word)) {
               allWordsFound = false;
               break; // Optimization: If one word fails, the AND rule fails
           }
@@ -175,14 +151,10 @@ async function processIncomingMessage(client: TelegramClient, message: Api.Messa
 
       if (allWordsFound) {
         matchedRule = keywordRule;
-        console.log(`[${sourcePrefix}] => MATCH FOUND for rule: "${matchedRule}"`);
+        console.log(`[${sourcePrefix}] MATCH FOUND for rule: "${matchedRule}"`);
         break; // Match found, no need to check other rules for the same message
-      } else {
-        console.log(`[${sourcePrefix}] => Rule "${keywordRule}" failed.`);
       }
     }
-    
-    console.log(`[${sourcePrefix}] --- FILTER CHECK COMPLETE ---`);
 
     if (matchedRule) {
         db.logMatch(matchedRule, chatId);
@@ -193,7 +165,7 @@ async function processIncomingMessage(client: TelegramClient, message: Api.Messa
           // @ts-ignore
           chatName = entity.title || entity.firstName || chatId;
         } catch (e) {
-          console.log(`[${sourcePrefix}] Could not fetch chat name for message`);
+          // Ignore fetch name errors
         }
 
         try {
@@ -201,12 +173,11 @@ async function processIncomingMessage(client: TelegramClient, message: Api.Messa
           await client.sendMessage(targetPeer, {
             message: `[${sourcePrefix}] Found match in ${chatName}:\n\n${message.text}\n\nLink: https://t.me/c/${cleanChatId}/${message.id}`,
           });
-          console.log(`[${sourcePrefix}] Successfully forwarded match to target: ${targetPeer}`);
+          console.log(`[${sourcePrefix}] Successfully forwarded match to target.`);
         } catch (e: any) {
           console.error(`[${sourcePrefix}] Failed to send message to target:`, e.message);
           try {
              await client.sendMessage("me", { message: `[Bot Error] Failed to send match to target channel. Error: ${e.message}\nRule: ${matchedRule}\nOriginal chat: ${chatName}` });
-             console.log(`[${sourcePrefix}] Error notification sent to 'me'`);
           } catch (meErr: any) {
              console.error(`[${sourcePrefix}] CRITICAL: Failed to send error notification to 'me':`, meErr.message);
           }
@@ -240,7 +211,6 @@ function startPollingWorker(client: TelegramClient) {
     setInterval(async () => {
         const sources = db.getSources();
         if (sources.length > 0) {
-           console.log(`[POLL TICK] Checking ${sources.length} sources.`);
            // Use Promise.allSettled to continue execution even if one source check fails
            await Promise.allSettled(sources.map(sourceId => checkSourceMessages(client, sourceId)));
         }
@@ -438,12 +408,9 @@ async function startBot() {
 
     if (!isMonitored) return;
 
-    console.log(`[EVENT] Incoming message from monitored chat: ${chatId}`);
-
     // Check against polling ID to avoid processing messages already handled by polling
     const currentLastId = db.getLastMessageId(chatId);
     if (message.id && currentLastId && BigInt(message.id) <= BigInt(currentLastId)) {
-        console.log(`[EVENT] Skipping message ${message.id} from ${chatId} as it is not newer than last polled ID (${currentLastId})`);
         return;
     }
     
@@ -452,7 +419,6 @@ async function startBot() {
     // If processed here, update the ID regardless to keep the fast path synced with the slow path baseline
     if (message.id) {
         db.setLastMessageId(chatId, message.id.toString());
-        console.log(`[EVENT] Updated last message ID for ${chatId} to ${message.id}`);
     }
     
   }, new NewMessage({ incoming: true }));
