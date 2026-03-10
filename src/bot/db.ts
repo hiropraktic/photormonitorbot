@@ -3,7 +3,7 @@ import path from "path";
 
 const db = new Database(path.join(process.cwd(), "bot.db"));
 
-db.exec(\`
+db.exec(`
   CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -21,7 +21,7 @@ db.exec(\`
     source_id TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
   );
-\`);
+`);
 
 // --- Target Channel Config ---
 export const getTargetChannel = () => {
@@ -97,12 +97,12 @@ export const logMatch = (keyword: string, sourceId: string) => {
 };
 
 export const getStats = () => {
-  const stats = db.prepare(\`
+  const stats = db.prepare(`
     SELECT keyword, source_id, COUNT(*) as count 
     FROM matches 
     WHERE timestamp >= datetime('now', '-24 hours')
     GROUP BY keyword, source_id
-  \`).all() as { keyword: string, source_id: string, count: number }[];
+  `).all() as { keyword: string, source_id: string, count: number }[];
   return stats;
 };
 
@@ -149,4 +149,3 @@ export const cleanDatabase = () => {
 };
 
 export default db;
-\`);

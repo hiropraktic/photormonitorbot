@@ -10,9 +10,9 @@ import { Api } from "telegram";
 dotenv.config();
 
 // Helper to handle Telegram IDs as BigInt or string
-function parsePeerId(id: string) {
+function parsePeerId(id: string): any {
   const clean = id.toString().replace(/['"\s]/g, "");
-  if (/^-?\\d+$/.test(clean)) return BigInt(clean);
+  if (/^-?\d+$/.test(clean)) return BigInt(clean);
   return clean;
 }
 
@@ -27,6 +27,7 @@ async function checkSourceMessages(client: TelegramClient, sourceId: string) {
         console.log(`Polling source: ${sourceId}. Last ID: ${lastMessageId || 'N/A'}`);
 
         // Fetch up to 5 recent messages
+        // @ts-ignore
         const messages = await client.getMessages(peer, { limit: 5 });
 
         if (!messages.length) {
@@ -72,7 +73,7 @@ async function checkSourceMessages(client: TelegramClient, sourceId: string) {
             // Update DB with the highest ID found in this successful batch
             if (newLastId !== null) {
                 db.setLastMessageId(sourceId, newLastId);
-                console.log(`Updated last message ID for \${sourceId} to \${newLastId}\`);
+                console.log(`Updated last message ID for ${sourceId} to ${newLastId}`);
             }
         } else if (lastMessageId === null && messages.length > 0) {
              // Initialization case: If we polled, found messages, but none were *newer* than null, 
@@ -80,12 +81,12 @@ async function checkSourceMessages(client: TelegramClient, sourceId: string) {
              const firstUsableMessage = messages.find(m => !m.out && m.id);
              if (firstUsableMessage && firstUsableMessage.id) {
                 db.setLastMessageId(sourceId, firstUsableMessage.id.toString());
-                console.log(\`Initialized last message ID for \${sourceId} to \${firstUsableMessage.id}\`);
+                console.log(`Initialized last message ID for ${sourceId} to ${firstUsableMessage.id}`);
              }
         }
 
     } catch (e: any) {
-        console.error(\`Polling error for source \${sourceId}: \${e.message}\`);
+        console.error(`Polling error for source ${sourceId}: ${e.message}`);
     }
 }
 
@@ -127,12 +128,12 @@ async function processIncomingMessage(client: TelegramClient, message: Api.Messa
         try {
           const cleanChatId = chatId.replace("-100", "");
           await client.sendMessage(targetPeer, {
-            message: \`[POLLING] Found match in \${chatName}:\\n\\n\${message.text}\\n\\nLink: https://t.me/c/\${cleanChatId}/\${message.id}\`,
+            message: `[POLLING] Found match in ${chatName}:\n\n${message.text}\n\nLink: https://t.me/c/${cleanChatId}/${message.id}`,
           });
-          console.log(\`Successfully forwarded polled match to target: \${targetPeer}\`);
+          console.log(`Successfully forwarded polled match to target: ${targetPeer}`);
         } catch (e: any) {
           console.error("Failed to send message to target:", e.message);
-          await client.sendMessage("me", { message: \`Error sending to target from polling: \${e.message}\` });
+          await client.sendMessage("me", { message: `Error sending to target from polling: ${e.message}` });
         }
         break; // Match found, no need to check other rules for the same message
       }
@@ -143,15 +144,15 @@ async function processIncomingMessage(client: TelegramClient, message: Api.Messa
 // Ensure the client knows about entities before they start sending updates
 async function cacheMonitoredEntities(client: TelegramClient) {
   const sources = db.getSources();
-  console.log(\`Caching \${sources.length} sources...\`);
+  console.log(`Caching ${sources.length} sources...`);
   
   for (const id of sources) {
     try {
       const peer = parsePeerId(id);
       await client.getEntity(peer);
-      console.log(\`Successfully cached source: \${id}\`);
+      console.log(`Successfully cached source: ${id}`);
     } catch (e: any) {
-      console.error(\`Failed to cache source \${id}: \${e.message}\`);
+      console.error(`Failed to cache source ${id}: ${e.message}`);
     }
   }
 }
@@ -159,11 +160,11 @@ async function cacheMonitoredEntities(client: TelegramClient) {
 // Main polling worker loop
 function startPollingWorker(client: TelegramClient) {
     const POLLING_INTERVAL_MS = 7000; // 7 seconds, between 5 and 10 seconds
-    console.log(\`Starting polling worker every \${POLLING_INTERVAL_MS / 1000} seconds...\`);
+    console.log(`Starting polling worker every ${POLLING_INTERVAL_MS / 1000} seconds...`);
 
     setInterval(async () => {
         const sources = db.getSources();
-        console.log(\`[POLL TICK] Checking \${sources.length} sources.\`);
+        console.log(`[POLL TICK] Checking ${sources.length} sources.`);
         
         // Use Promise.allSettled to continue execution even if one source check fails
         await Promise.allSettled(sources.map(sourceId => checkSourceMessages(client, sourceId)));
@@ -234,39 +235,39 @@ async function startBot() {
       const keywordRule = text.substring(command.length).trim();
       if (keywordRule) {
         db.addKeyword(keywordRule);
-        await client.sendMessage(message.chatId, { message: \`Keyword rule added: \${keywordRule}\` });
+        await client.sendMessage(message.chatId, { message: `Keyword rule added: ${keywordRule}` });
         // No need to recache for keywords
       } else {
-        await client.sendMessage(message.chatId, { message: \`Please provide a keyword or rule. Example: /add_keyword photo, moscow\` });
+        await client.sendMessage(message.chatId, { message: `Please provide a keyword or rule. Example: /add_keyword photo, moscow` });
       }
     } else if (command === "/list_keywords") {
       const keywords = db.getKeywords();
       if (keywords.length === 0) {
-        await client.sendMessage(message.chatId, { message: \`No keywords or rules found.\` });
+        await client.sendMessage(message.chatId, { message: `No keywords or rules found.` });
       } else {
-        const formattedKeywords = keywords.map(k => \`- \`\${k}\`\`).join("\n");
-        await client.sendMessage(message.chatId, { message: \`**Keywords/Rules:**\\n\${formattedKeywords}\` });
+        const formattedKeywords = keywords.map(k => `- \`${k}\``).join("\n");
+        await client.sendMessage(message.chatId, { message: `**Keywords/Rules:**\n${formattedKeywords}` });
       }
     } else if (command === "/remove_keyword") {
       const keywordRule = text.substring(command.length).trim();
       if (keywordRule) {
         db.removeKeyword(keywordRule);
-        await client.sendMessage(message.chatId, { message: \`Keyword rule removed: \${keywordRule}\` });
+        await client.sendMessage(message.chatId, { message: `Keyword rule removed: ${keywordRule}` });
       } else {
-        await client.sendMessage(message.chatId, { message: \`Please provide a keyword or rule to remove.\` });
+        await client.sendMessage(message.chatId, { message: `Please provide a keyword or rule to remove.` });
       }
     } else if (command === "/clean_keywords") {
       db.clearKeywords();
-      await client.sendMessage(message.chatId, { message: \`All keyword rules have been cleared.\` });
+      await client.sendMessage(message.chatId, { message: `All keyword rules have been cleared.` });
     } else if (command === "/add_source") {
       const sourceId = parts[1];
       if (sourceId) {
         db.addSource(sourceId);
         try {
           await client.getEntity(parsePeerId(sourceId));
-          await client.sendMessage(message.chatId, { message: \`Source added and cached: \${sourceId}\` });
+          await client.sendMessage(message.chatId, { message: `Source added and cached: ${sourceId}` });
         } catch (e: any) {
-          await client.sendMessage(message.chatId, { message: \`Source added to DB but failed to cache entity: \${e.message}\` });
+          await client.sendMessage(message.chatId, { message: `Source added to DB but failed to cache entity: ${e.message}` });
         }
       }
     } else if (command === "/list_sources") {
@@ -278,36 +279,36 @@ async function startBot() {
           // @ts-ignore
           const name = entity.title || entity.firstName || "Unknown";
           const cleanId = id.replace(/['"\s]/g, '').replace("-100", "");
-          return \`- \${name} (https://t.me/c/\${cleanId}/999999)\\n  ID: \`\${id}\`\`;
+          return `- ${name} (https://t.me/c/${cleanId}/999999)\n  ID: \`${id}\``;
         } catch (e) {
-          return \`- Unknown Group\\n  ID: \`\${id}\`\`;
+          return `- Unknown Group\n  ID: \`${id}\``;
         }
       }));
       
       if (sourceInfo.length === 0) {
-        await client.sendMessage(message.chatId, { message: \`No sources found.\` });
+        await client.sendMessage(message.chatId, { message: `No sources found.` });
       } else {
-        await client.sendMessage(message.chatId, { message: \`**Sources:**\\n\${sourceInfo.join("\n\n")}\` });
+        await client.sendMessage(message.chatId, { message: `**Sources:**\n${sourceInfo.join("\n\n")}` });
       }
     } else if (command === "/remove_source") {
       if (parts[1]) {
         db.removeSource(parts[1]);
-        await client.sendMessage(message.chatId, { message: \`Source removed: \${parts[1]}\` });
+        await client.sendMessage(message.chatId, { message: `Source removed: ${parts[1]}` });
       } else {
-        await client.sendMessage(message.chatId, { message: \`Please provide a source ID to remove.\` });
+        await client.sendMessage(message.chatId, { message: `Please provide a source ID to remove.` });
       }
     } else if (command === "/clean_sources") {
       db.clearSources();
-      await client.sendMessage(message.chatId, { message: \`All sources have been cleared.\` });
+      await client.sendMessage(message.chatId, { message: `All sources have been cleared.` });
     } else if (command === "/set_target") {
       db.setTargetChannel(parts[1]);
-      await client.sendMessage(message.chatId, { message: \`Target channel set: \${parts[1]}\` });
+      await client.sendMessage(message.chatId, { message: `Target channel set: ${parts[1]}` });
     } else if (command === "/get_target") {
       const target = db.getTargetChannel();
-      await client.sendMessage(message.chatId, { message: \`Current target channel: \${target || "Not set"}\` });
+      await client.sendMessage(message.chatId, { message: `Current target channel: ${target || "Not set"}` });
     } else if (command === "/remove_target") {
       db.removeTargetChannel();
-      await client.sendMessage(message.chatId, { message: \`Target channel has been removed. You will not receive any alerts until you set a new one.\` });
+      await client.sendMessage(message.chatId, { message: `Target channel has been removed. You will not receive any alerts until you set a new one.` });
     } else if (command === "/stats") {
       const stats = db.getStats();
       const statsText = await Promise.all(stats.map(async (s) => {
@@ -315,12 +316,12 @@ async function startBot() {
           const peerId = parsePeerId(s.source_id);
           const entity = await client.getEntity(peerId);
           // @ts-ignore
-          return \`\${s.keyword} in \${entity.title || entity.firstName || "Unknown"}: \${s.count}\`;
+          return `${s.keyword} in ${entity.title || entity.firstName || "Unknown"}: ${s.count}`;
         } catch (e) {
-          return \`\${s.keyword} in \${s.source_id}: \${s.count}\`;
+          return `${s.keyword} in ${s.source_id}: ${s.count}`;
         }
       }));
-      await client.sendMessage(message.chatId, { message: \`Stats (24h):\\n\${statsText.join("\n") || "No data"}\` });
+      await client.sendMessage(message.chatId, { message: `Stats (24h):\n${statsText.join("\n") || "No data"}` });
     } else if (command === "/help") {
       await client.sendMessage(message.chatId, { message: HELP_TEXT });
     }
@@ -335,23 +336,23 @@ async function startBot() {
     if (!chatId) return;
 
     const sources = db.getSources();
-    const normalizedChatId = chatId.startsWith("-100") ? chatId : \`-100\${chatId}\`;
+    const normalizedChatId = chatId.startsWith("-100") ? chatId : `-100${chatId}`;
     
     // Check if the message comes from one of the monitored sources
     const isMonitored = sources.some(s => {
       const cleanS = s.replace(/['"\s]/g, '');
-      const normalizedS = cleanS.startsWith("-100") ? cleanS : \`-100\${cleanS}\`;
+      const normalizedS = cleanS.startsWith("-100") ? cleanS : `-100${cleanS}`;
       return cleanS === chatId || normalizedS === chatId || cleanS === normalizedChatId || normalizedS === normalizedChatId;
     });
 
     if (!isMonitored) return;
 
-    console.log(\`Incoming message from monitored chat (Event Listener): \${chatId}\`);
+    console.log(`Incoming message from monitored chat (Event Listener): ${chatId}`);
 
     // Check against polling ID to avoid processing messages already handled by polling (i.e., messages that arrived before the push event did, or when the push event is delayed)
     const currentLastId = db.getLastMessageId(chatId);
     if (message.id && currentLastId && BigInt(message.id) <= BigInt(currentLastId)) {
-        console.log(\`Skipping message \${message.id} from \${chatId} as it is not newer than last polled ID (\${currentLastId})\`);
+        console.log(`Skipping message ${message.id} from ${chatId} as it is not newer than last polled ID (${currentLastId})`);
         return;
     }
     
@@ -385,12 +386,12 @@ async function startBot() {
         try {
           const cleanChatId = chatId.replace("-100", "");
           await client.sendMessage(targetPeer, {
-            message: \`[EVENT] Found match in \${chatName}:\\n\\n\${message.text}\\n\\nLink: https://t.me/c/\${cleanChatId}/\${message.id}\`,
+            message: `[EVENT] Found match in ${chatName}:\n\n${message.text}\n\nLink: https://t.me/c/${cleanChatId}/${message.id}`,
           });
-          console.log(\`Successfully forwarded match to target: \${targetPeer}\`);
+          console.log(`Successfully forwarded match to target: ${targetPeer}`);
         } catch (e: any) {
           console.error("Failed to send message to target:", e.message);
-          await client.sendMessage("me", { message: \`Error sending to target: \${e.message}\` });
+          await client.sendMessage("me", { message: `Error sending to target: ${e.message}` });
         }
         break; // Match found, no need to check other rules for the same message
       }
@@ -399,7 +400,7 @@ async function startBot() {
     // If processed here, update the ID regardless to keep the fast path synced with the slow path baseline
     if (message.id) {
         db.setLastMessageId(chatId, message.id.toString());
-        console.log(\`Updated last message ID for \${chatId} to \${message.id} via Event Listener update.\`);
+        console.log(`Updated last message ID for ${chatId} to ${message.id} via Event Listener update.`);
     }
     
   }, new NewMessage({ incoming: true }));
